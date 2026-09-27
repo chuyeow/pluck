@@ -51,9 +51,12 @@ enum Settings {
         get { defaults.bool(forKey: "appendToClipboard") }
         set { defaults.set(newValue, forKey: "appendToClipboard") }
     }
-    /// A name from /System/Library/Sounds, or "None".
+    /// Pluck's own sounds (Resources/Sounds, from scripts/make_sounds.py), plus "None".
+    static let sounds = ["None", "Koto", "Kalimba", "Droplet", "Woodblock", "Chime", "Seed"]
+
+    /// Falls back to Koto if the saved name is no longer offered (earlier versions used system sounds).
     static var sound: String {
-        get { defaults.string(forKey: "sound") ?? "Pop" }
+        get { defaults.string(forKey: "sound").flatMap { sounds.contains($0) ? $0 : nil } ?? "Koto" }
         set { defaults.set(newValue, forKey: "sound") }
     }
     static var speak: Bool {
@@ -97,7 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Serial: Vision fails (e5rt error) when two requests load its models concurrently.
     private let visionQueue = DispatchQueue(label: "com.chuyeow.pluck.vision", qos: .userInitiated)
     private var shortcutWindow: ShortcutWindowController?
-    private static let sounds = ["None", "Pop", "Tink", "Glass", "Purr", "Bottle", "Morse", "Submarine"]
     private let captureItem = NSMenuItem(title: "Capture Text", action: #selector(captureFromMenu), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -125,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(toggle("Append to Clipboard", \.appendToClipboard, #selector(toggleAppend)))
         menu.addItem(toggle("Speak Captured Text", \.speak, #selector(toggleSpeak)))
         let soundMenu = NSMenu()
-        for name in Self.sounds {
+        for name in Settings.sounds {
             let item = NSMenuItem(title: name, action: #selector(selectSound), keyEquivalent: "")
             item.target = self
             item.state = name == Settings.sound ? .on : .off
@@ -159,7 +161,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectSound(_ item: NSMenuItem) {
         Settings.sound = item.title
         item.menu?.items.forEach { $0.state = $0.title == item.title ? .on : .off }
-        NSSound(named: item.title)?.play()
+        let played = NSSound(named: item.title)?.play() ?? false
+        log.info("sound \(item.title, privacy: .public) played: \(played)")
     }
 
     @objc private func toggleLogin(_ item: NSMenuItem) {

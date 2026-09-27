@@ -10,7 +10,7 @@ Menu bar app that copies text from anything on your screen. Press **⇧⌘2**, d
 - Keep Line Breaks: off joins lines into one paragraph and repairs hyphenated words.
 - Append to Clipboard: adds each capture to what is already copied.
 - Speak Captured Text: reads the result aloud.
-- Sound: pick the capture sound (Pop by default, or None). Choosing one plays it.
+- Sound: pick the capture sound: Koto (default), Kalimba, Droplet, Woodblock, Chime, Seed, or None. Choosing one plays it. The sounds are synthesized by `scripts/make_sounds.py` (stdlib Python); edit and rerun it to tune them.
 - Launch at Login.
 - CLI: `/Applications/Pluck.app/Contents/MacOS/Pluck image.png` prints recognized text.
 
