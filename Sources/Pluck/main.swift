@@ -131,6 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var hotKey = HotKey { [weak self] in self?.capture() }
     private let speech = AVSpeechSynthesizer()
     private var capturing = false
+    // Serial: Vision fails (e5rt error) when two requests load its models concurrently.
+    private let visionQueue = DispatchQueue(label: "com.chuyeow.pluck.vision", qos: .userInitiated)
     private var shortcutWindow: NSWindow?
     private let captureItem = NSMenuItem(title: "Capture Text", action: #selector(captureFromMenu), keyEquivalent: "")
 
@@ -139,6 +141,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         applyShortcut(Settings.shortcut)
         if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
+        // First use after install compiles Vision's models (~1–2 min). Pay it now, not on the first capture.
+        visionQueue.async {
+            let blank = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            _ = try? Recognizer.recognize(blank.makeImage()!)
+            log.info("vision warmed up")
+        }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
     }
 
@@ -209,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
             shortcutWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         shortcutWindow?.makeKeyAndOrderFront(nil)
     }
 
@@ -229,7 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         log.info("capture started, screen access: \(CGPreflightScreenCaptureAccess())")
         capturing = true
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("pluck-\(UUID().uuidString).png")
-        DispatchQueue.global(qos: .userInitiated).async {
+        visionQueue.async {
             defer { try? FileManager.default.removeItem(at: file) }
             // macOS's own selection UI: crosshair, drag across any display, Space for window mode, Esc cancels.
             let process = Process()

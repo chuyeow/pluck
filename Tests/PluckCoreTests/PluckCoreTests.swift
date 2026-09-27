@@ -72,6 +72,7 @@ func renderQR(_ payload: String) -> CGImage {
     #expect(clipboardText(new: "b", existing: "a", append: false) == "b")
     #expect(clipboardText(new: "b", existing: nil, append: true) == "b")
     #expect(clipboardText(new: "b", existing: "", append: true) == "b")
+    #expect(clipboardText(new: "b", existing: "a\n", append: true) == "a\nb")
 }
 
 @Test func shortcutDisplayAndCarbonFlags() {

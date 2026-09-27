@@ -40,5 +40,5 @@ public enum Recognizer {
 
 public func clipboardText(new: String, existing: String?, append: Bool) -> String {
     guard append, let existing, !existing.isEmpty else { return new }
-    return existing + "\n" + new
+    return existing.hasSuffix("\n") ? existing + new : existing + "\n" + new
 }
