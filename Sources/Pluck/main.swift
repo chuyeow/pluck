@@ -6,6 +6,23 @@ import PluckCore
 import ServiceManagement
 import UserNotifications
 
+// Dev aid: `Pluck --snapshot-shortcut-window out.png [light|dark] [recording]` renders the window
+// offscreen, so its look can be checked without a Screen Recording grant.
+if CommandLine.arguments.dropFirst().first == "--snapshot-shortcut-window" {
+    let args = CommandLine.arguments
+    _ = NSApplication.shared
+    let controller = ShortcutWindowController()
+    let window = controller.window!
+    window.appearance = NSAppearance(named: args.contains("dark") ? .darkAqua : .aqua)
+    if args.contains("recording") { controller.showRecording() }
+    window.layoutIfNeeded()
+    let view = window.contentView!.superview! // Theme frame: includes the traffic lights.
+    let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+    view.cacheDisplay(in: view.bounds, to: rep)
+    try rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: args[2]))
+    exit(0)
+}
+
 // CLI mode: `Pluck <image>` prints the recognized text. Handy for scripts and for testing the pipeline.
 if CommandLine.arguments.count > 1 {
     let url = URL(fileURLWithPath: CommandLine.arguments[1])
@@ -33,6 +50,11 @@ enum Settings {
     static var appendToClipboard: Bool {
         get { defaults.bool(forKey: "appendToClipboard") }
         set { defaults.set(newValue, forKey: "appendToClipboard") }
+    }
+    /// A name from /System/Library/Sounds, or "None".
+    static var sound: String {
+        get { defaults.string(forKey: "sound") ?? "Pop" }
+        set { defaults.set(newValue, forKey: "sound") }
     }
     static var speak: Bool {
         get { defaults.bool(forKey: "speak") }
@@ -67,65 +89,6 @@ final class HotKey {
     }
 }
 
-/// Button that records the next key combo pressed while it is active.
-final class ShortcutRecorder: NSButton {
-    var onChange: ((Shortcut) -> Void)?
-    var onRecordingChange: ((Bool) -> Void)?
-    private var monitor: Any?
-    var shortcut: Shortcut { didSet { title = shortcut.display } }
-
-    init(shortcut: Shortcut) {
-        self.shortcut = shortcut
-        super.init(frame: .zero)
-        bezelStyle = .rounded
-        title = shortcut.display
-        target = self
-        action = #selector(toggle)
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    @objc private func toggle() { monitor == nil ? start() : stop() }
-
-    private func start() {
-        title = "Type shortcut…"
-        onRecordingChange?(true)
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            if event.keyCode == UInt16(kVK_Escape) { self.stop(); return nil }
-            let flags = event.modifierFlags
-            let candidate = Shortcut(
-                keyCode: UInt32(event.keyCode),
-                key: Self.label(for: event),
-                command: flags.contains(.command), shift: flags.contains(.shift),
-                option: flags.contains(.option), control: flags.contains(.control))
-            guard candidate.isValid else { NSSound.beep(); return nil }
-            self.shortcut = candidate
-            self.onChange?(candidate)
-            self.stop()
-            return nil
-        }
-    }
-
-    private func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        title = shortcut.display
-        onRecordingChange?(false)
-    }
-
-    private static let specialKeys: [Int: String] = [
-        kVK_Space: "Space", kVK_Return: "↩", kVK_Tab: "⇥", kVK_Delete: "⌫", kVK_ForwardDelete: "⌦",
-        kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
-        kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
-        kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
-    ]
-
-    private static func label(for event: NSEvent) -> String {
-        specialKeys[Int(event.keyCode)] ?? (event.charactersIgnoringModifiers ?? "?").uppercased()
-    }
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private lazy var hotKey = HotKey { [weak self] in self?.capture() }
@@ -133,13 +96,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var capturing = false
     // Serial: Vision fails (e5rt error) when two requests load its models concurrently.
     private let visionQueue = DispatchQueue(label: "com.chuyeow.pluck.vision", qos: .userInitiated)
-    private var shortcutWindow: NSWindow?
+    private var shortcutWindow: ShortcutWindowController?
+    private static let sounds = ["None", "Pop", "Tink", "Glass", "Purr", "Bottle", "Morse", "Submarine"]
     private let captureItem = NSMenuItem(title: "Capture Text", action: #selector(captureFromMenu), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.image = NSImage(systemSymbolName: "text.viewfinder", accessibilityDescription: "Pluck")
         buildMenu()
-        applyShortcut(Settings.shortcut)
+        if !applyShortcut(Settings.shortcut) {
+            notify("Shortcut unavailable", "\(Settings.shortcut.display) is used by another app. Pick another in Change Shortcut…")
+        }
         if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
         // First use after install compiles Vision's models (~1–2 min). Pay it now, not on the first capture.
         visionQueue.async {
@@ -158,6 +124,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(toggle("Keep Line Breaks", \.keepLineBreaks, #selector(toggleLineBreaks)))
         menu.addItem(toggle("Append to Clipboard", \.appendToClipboard, #selector(toggleAppend)))
         menu.addItem(toggle("Speak Captured Text", \.speak, #selector(toggleSpeak)))
+        let soundMenu = NSMenu()
+        for name in Self.sounds {
+            let item = NSMenuItem(title: name, action: #selector(selectSound), keyEquivalent: "")
+            item.target = self
+            item.state = name == Settings.sound ? .on : .off
+            soundMenu.addItem(item)
+            if name == "None" { soundMenu.addItem(.separator()) }
+        }
+        let sound = NSMenuItem(title: "Sound", action: nil, keyEquivalent: "")
+        sound.submenu = soundMenu
+        menu.addItem(sound)
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
@@ -178,6 +155,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleAppend(_ item: NSMenuItem) { Settings.appendToClipboard.toggle(); item.state = Settings.appendToClipboard ? .on : .off }
     @objc private func toggleSpeak(_ item: NSMenuItem) { Settings.speak.toggle(); item.state = Settings.speak ? .on : .off }
 
+    /// Selecting a sound also plays it, so the menu doubles as a preview.
+    @objc private func selectSound(_ item: NSMenuItem) {
+        Settings.sound = item.title
+        item.menu?.items.forEach { $0.state = $0.title == item.title ? .on : .off }
+        NSSound(named: item.title)?.play()
+    }
+
     @objc private func toggleLogin(_ item: NSMenuItem) {
         do {
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
@@ -187,45 +171,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
-    private func applyShortcut(_ shortcut: Shortcut) {
-        if hotKey.register(shortcut) {
-            captureItem.title = "Capture Text (\(shortcut.display))"
-        } else {
-            captureItem.title = "Capture Text"
-            notify("Shortcut unavailable", "\(shortcut.display) is taken by another app. Pick another in Change Shortcut…")
-        }
+    @discardableResult
+    private func applyShortcut(_ shortcut: Shortcut) -> Bool {
+        let ok = hotKey.register(shortcut)
+        captureItem.title = ok ? "Capture Text (\(shortcut.display))" : "Capture Text"
+        return ok
     }
 
     @objc private func showShortcutWindow() {
         if shortcutWindow == nil {
-            let recorder = ShortcutRecorder(shortcut: Settings.shortcut)
-            // Release the hotkey while recording so pressing the current combo is captured, not triggered.
-            recorder.onRecordingChange = { [weak self] recording in
-                if recording { self?.hotKey.unregister() } else { self?.applyShortcut(Settings.shortcut) }
-            }
-            recorder.onChange = { Settings.shortcut = $0 }
-            let reset = NSButton(title: "Reset to ⇧⌘2", target: nil, action: nil)
-            reset.bezelStyle = .rounded
-            reset.target = self
-            reset.action = #selector(resetShortcut)
-            let label = NSTextField(labelWithString: "Capture Text shortcut:")
-            let stack = NSStackView(views: [label, recorder, reset])
-            stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-            let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "Pluck Shortcut"
-            window.contentView = stack
-            window.isReleasedWhenClosed = false
-            window.center()
-            shortcutWindow = window
+            let controller = ShortcutWindowController()
+            controller.register = { [weak self] in self?.applyShortcut($0) ?? false }
+            controller.unregister = { [weak self] in self?.hotKey.unregister() }
+            shortcutWindow = controller
         }
         NSApp.activate()
-        shortcutWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    @objc private func resetShortcut() {
-        Settings.shortcut = .default
-        (shortcutWindow?.contentView as? NSStackView)?.views.compactMap { $0 as? ShortcutRecorder }.first?.shortcut = .default
-        applyShortcut(.default)
+        shortcutWindow?.showWindow(nil)
     }
 
     @objc private func captureFromMenu() {
@@ -283,7 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let combined = clipboardText(new: text, existing: pasteboard.string(forType: .string), append: Settings.appendToClipboard)
             pasteboard.clearContents()
             pasteboard.setString(combined, forType: .string)
-            NSSound(named: "Pop")?.play()
+            NSSound(named: Settings.sound)?.play()
             notify(recognition.barcodes.isEmpty ? "Text copied" : "Code copied", text)
             if Settings.speak {
                 speech.stopSpeaking(at: .immediate)

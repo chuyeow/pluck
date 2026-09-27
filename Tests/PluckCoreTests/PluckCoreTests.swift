@@ -82,6 +82,8 @@ func renderQR(_ payload: String) -> CGImage {
     let all = Shortcut(keyCode: 0, key: "A", command: true, shift: true, option: true, control: true)
     #expect(all.display == "⌃⌥⇧⌘A")
     #expect(all.carbonModifiers == 256 | 512 | 2048 | 4096)
+    #expect(all.keys == ["⌃", "⌥", "⇧", "⌘", "A"])
+    #expect(Shortcut.default.keys == ["⇧", "⌘", "2"])
 }
 
 @Test func shortcutNeedsANonShiftModifier() {

@@ -22,10 +22,12 @@ public struct Shortcut: Codable, Equatable, Sendable {
     /// Shift alone would swallow ordinary typing.
     public var isValid: Bool { command || option || control }
 
-    /// Apple's canonical order: ⌃⌥⇧⌘.
-    public var display: String {
-        (control ? "⌃" : "") + (option ? "⌥" : "") + (shift ? "⇧" : "") + (command ? "⌘" : "") + key
+    /// One label per key, in Apple's canonical order: ⌃⌥⇧⌘.
+    public var keys: [String] {
+        [(control, "⌃"), (option, "⌥"), (shift, "⇧"), (command, "⌘")].filter(\.0).map(\.1) + [key]
     }
+
+    public var display: String { keys.joined() }
 
     /// Carbon's cmdKey, shiftKey, optionKey, controlKey.
     public var carbonModifiers: UInt32 {
