@@ -22,6 +22,13 @@ scripts/bundle.sh --install # builds build/Pluck.app and copies it to /Applicati
 open /Applications/Pluck.app
 ```
 
+## CI and releases
+
+- `.github/workflows/test.yml` runs `swift test` and builds the bundle on every push and pull request.
+- `.github/workflows/release.yml` runs on every push to `main`: tests, builds `Pluck-1.0.<run>.dmg` with `scripts/dmg.sh`, and publishes it as a GitHub release tagged `v1.0.<run>`.
+
+CI builds are ad-hoc signed and not notarized. On another Mac, Gatekeeper blocks the first launch: right-click Pluck.app › Open, or run `xattr -dr com.apple.quarantine /Applications/Pluck.app`.
+
 On first launch, grant Screen Recording in System Settings › Privacy & Security › Screen & System Audio Recording, then relaunch Pluck. Without it, captures contain only the wallpaper.
 
 The bundle is signed with your first Apple Development identity so the Screen Recording grant survives rebuilds. Override with `SIGN_IDENTITY=...`; with no identity it falls back to ad-hoc signing, which resets the grant on every build.

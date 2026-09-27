@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds build/Pluck.app. Usage: scripts/bundle.sh [--install] (copies to /Applications).
+# Builds build/Pluck.app. Usage: [VERSION=1.2.3] scripts/bundle.sh [--install] (copies to /Applications).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 swift build -c release
@@ -26,8 +26,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Pluck</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION:-1.0}</string>
+  <key>CFBundleVersion</key><string>${VERSION:-1.0}</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
 </dict>
