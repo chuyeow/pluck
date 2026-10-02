@@ -2,6 +2,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreText
 import Testing
+import Vision
 @testable import PluckCore
 
 // Renders black text on white, like text on a screen.
@@ -94,4 +95,37 @@ func renderQR(_ payload: String) -> CGImage {
 @Test func shortcutRoundTripsThroughJSON() throws {
     let data = try JSONEncoder().encode(Shortcut.default)
     #expect(try JSONDecoder().decode(Shortcut.self, from: data) == .default)
+}
+
+struct Flaky: Error {}
+
+@Test func fallsBackToFastModelOnModelFailure() throws {
+    var levels: [VNRequestTextRecognitionLevel] = [], fallbacks = 0
+    let result = try Recognizer.withFallback(onFallback: { _ in fallbacks += 1 }) { level in
+        levels.append(level)
+        if level == .accurate { throw Flaky() }
+        return Recognition(lines: ["ok"], barcodes: [])
+    }
+    #expect(levels == [.accurate, .fast])
+    #expect(fallbacks == 1)
+    #expect(result.lines == ["ok"])
+}
+
+@Test func usesAccurateModelWhenItWorks() throws {
+    var levels: [VNRequestTextRecognitionLevel] = []
+    _ = try Recognizer.withFallback { levels.append($0); return Recognition(lines: [], barcodes: []) }
+    #expect(levels == [.accurate])
+}
+
+@Test func tooSmallSelectionSkipsFallback() {
+    let tooSmall = NSError(domain: VNErrorDomain, code: VNErrorCode.invalidImage.rawValue)
+    var levels: [VNRequestTextRecognitionLevel] = []
+    #expect(throws: NSError.self) {
+        try Recognizer.withFallback { levels.append($0); throw tooSmall }
+    }
+    #expect(levels == [.accurate])
+}
+
+@Test func fastFailureIsRethrown() {
+    #expect(throws: Flaky.self) { try Recognizer.withFallback { _ in throw Flaky() } }
 }

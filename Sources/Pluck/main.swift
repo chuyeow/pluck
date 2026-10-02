@@ -114,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let blank = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
             _ = try? Recognizer.recognize(blank.makeImage()!)
-            log.info("vision warmed up")
+            log.notice("vision warmed up")
         }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
     }
@@ -199,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func capture() {
         guard !capturing else { return }
-        log.info("capture started, screen access: \(CGPreflightScreenCaptureAccess())")
+        log.notice("capture started, screen access: \(CGPreflightScreenCaptureAccess())")
         capturing = true
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("pluck-\(UUID().uuidString).png")
         visionQueue.async {
@@ -213,7 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try process.run()
                 process.waitUntilExit()
                 if let image = NSImage(contentsOf: file)?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                    result = .success(try Recognizer.recognize(image))
+                    result = .success(try Recognizer.recognize(image) { error in
+                        log.error("accurate model failed, using fast: \(String(describing: error), privacy: .public)")
+                    })
                 } else {
                     result = nil // Cancelled.
                 }
@@ -230,14 +232,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finish(_ result: Result<Recognition, Error>?) {
         switch result {
         case nil:
-            log.info("capture cancelled")
+            log.notice("capture cancelled")
             return
         case .failure(let error):
-            log.error("capture failed: \(error.localizedDescription, privacy: .public)")
-            notify("Capture failed", error.localizedDescription)
+            log.error("capture failed: \(String(describing: error), privacy: .public)")
+            NSSound.beep()
+            notify("Couldn't read text", "Try again with a larger selection. \(error.localizedDescription)")
         case .success(let recognition):
             let text = recognition.text(keepLineBreaks: Settings.keepLineBreaks)
-            log.info("recognized \(recognition.lines.count) lines, \(recognition.barcodes.count) codes, \(text.count) chars")
+            log.notice("recognized \(recognition.lines.count) lines, \(recognition.barcodes.count) codes, \(text.count) chars")
             guard !text.isEmpty else {
                 NSSound.beep()
                 notify("No text found", "Try a larger selection or zoom in.")
